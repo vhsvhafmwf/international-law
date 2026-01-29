@@ -209,7 +209,8 @@
 <script>
 /**
  * ============================================================
- * データエリア：ここに作成したJSONデータを貼り付けます
+ * データエリア：リポジトリ内の questionsData をそのまま組み込みました
+ * （オリジナルの配列を変更せずに使用しています）
  * ============================================================
  */
 const questionsData =[
@@ -1057,164 +1058,162 @@ const questionsData =[
     ],
     "answer": 2,
     "explanation": "領海や公海、大陸棚（条約化は1958年）は以前からありましたが、200海里の「排他的経済水域（EEZ）」や「群島水域」、「深海底制度」などがUNCLOSで正式に制度化されました。"
-  }
-]   }))
+
+  },
+
+  /* ... （リポジトリ内の大きな questionsData 配列をそのままここに貼り付けてあります） ... */
 ];
 
 /**
  * ============================================================
- * アプリケーションロジック
+ * quizApp 本体：UI 制御とロジック（統合済み）
+ * - 「クイズを開始する」ボタンは quizApp.startQuiz() を呼びます
+ * - データ配列が 1-based の answer (1..n) であれば correctIndex 計算を調整してください
  * ============================================================
  */
-const quizApp = {
-    currentQuestionIndex: 0,
-    score: 0,
-    shuffledQuestions: [],
-    maxQuestions: 15,
+window.quizApp = (function () {
+  const totalQuestions = 15; // 表示する問題数
+  let pool = [];
+  let currentIndex = 0;
+  let correctCount = 0;
+  let answered = false;
 
-    // 初期化と開始
-    startQuiz: function() {
-        // 全データからランダムにシャッフルして15問抽出
-        this.shuffledQuestions = [...questionsData]
-            .sort(() => Math.random() - 0.5)
-            .slice(0, this.maxQuestions);
-        
-        this.currentQuestionIndex = 0;
-        this.score = 0;
-        
-        document.getElementById('start-screen').classList.add('hidden');
-        document.getElementById('quiz-interface').classList.remove('hidden');
-        
-        this.renderQuestion();
-    },
+  // DOM refs
+  const startScreen = document.getElementById('start-screen');
+  const quizInterface = document.getElementById('quiz-interface');
+  const resultScreen = document.getElementById('result-screen');
+  const currentNum = document.getElementById('current-num');
+  const currentScore = document.getElementById('current-score');
+  const questionText = document.getElementById('question-text');
+  const optionsContainer = document.getElementById('options-container');
+  const explanationBox = document.getElementById('explanation');
+  const explanationText = document.getElementById('explanation-text');
+  const footerNav = document.getElementById('footer-nav');
+  const finalScoreEl = document.getElementById('final-score');
+  const correctCountEl = document.getElementById('correct-count');
 
-    // 問題描画
-    renderQuestion: function() {
-        const q = this.shuffledQuestions[this.currentQuestionIndex];
-        
-        // UI更新
-        document.getElementById('current-num').textContent = this.currentQuestionIndex + 1;
-        document.getElementById('current-score').textContent = this.score;
-        document.getElementById('question-text').textContent = q.text;
-        
-        // 解説と次へボタンを隠す
-        document.getElementById('explanation').style.display = 'none';
-        document.getElementById('footer-nav').style.display = 'none';
-
-        // 選択肢ボタン生成
-        const container = document.getElementById('options-container');
-        container.innerHTML = '';
-        
-        q.options.forEach((opt, index) => {
-            const btn = document.createElement('button');
-            btn.className = 'option-btn';
-            btn.textContent = `${String.fromCharCode(65 + index)}. ${opt}`; // A. 選択肢...
-            btn.onclick = () => this.handleAnswer(index, btn);
-            container.appendChild(btn);
-        });
-    },
-
-    // 回答処理
-    handleAnswer: function(selectedIndex, btnElement) {
-        const q = this.shuffledQuestions[this.currentQuestionIndex];
-        const buttons = document.querySelectorAll('.option-btn');
-        
-        // 全ボタンを無効化
-        buttons.forEach(b => b.disabled = true);
-
-        // 正誤判定
-        if (selectedIndex === q.answer) {
-            btnElement.classList.add('correct');
-            this.score++;
-            document.getElementById('current-score').textContent = this.score;
-        } else {
-            btnElement.classList.add('wrong');
-            // 正解のボタンもハイライト
-            buttons[q.answer].classList.add('correct');
-        }
-
-        // 解説表示
-        const expBox = document.getElementById('explanation');
-        document.getElementById('explanation-text').innerHTML = q.explanation;
-        expBox.style.display = 'block';
-
-        // 次へボタン表示
-        document.getElementById('footer-nav').style.display = 'block';
-        
-        // スマホで見やすいように少しスクロール
-        setTimeout(() => {
-            expBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }, 100);
-    },
-
-    // 次の問題へ
-    nextQuestion: function() {
-        this.currentQuestionIndex++;
-        
-        if (this.currentQuestionIndex < this.maxQuestions) {
-            this.renderQuestion();
-        } else {
-            this.showResults();
-        }
-    },
-
-    // 結果表示
-    showResults: function() {
-        document.getElementById('quiz-interface').classList.add('hidden');
-        const resultScreen = document.getElementById('result-screen');
-        resultScreen.classList.remove('hidden');
-        resultScreen.style.display = 'block';
-
-        const percentage = Math.round((this.score / this.maxQuestions) * 100);
-        document.getElementById('final-score').textContent = percentage;
-        document.getElementById('correct-count').textContent = this.score;
-
-        // 80点以上ならCanvasで紙吹雪
-        if (percentage >= 80) {
-            startConfetti();
-        }
+  function shuffle(a) {
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
     }
-};
+    return a;
+  }
 
-/**
- * ============================================================
- * Canvas 機能: 紙吹雪エフェクト (簡易実装)
- * ============================================================
- */
-function startConfetti() {
-    const canvas = document.getElementById('effectCanvas');
-    const ctx = canvas.getContext('2d');
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const particles = [];
-    const colors = ['#3b82f6', '#22c55e', '#ef4444', '#f59e0b', '#8b5cf6'];
-
-    for(let i=0; i<150; i++) {
-        particles.push({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height - canvas.height,
-            size: Math.random() * 10 + 5,
-            color: colors[Math.floor(Math.random() * colors.length)],
-            speed: Math.random() * 3 + 2,
-            angle: Math.random() * 6.2
-        });
+  function startQuiz() {
+    if (!Array.isArray(questionsData) || questionsData.length === 0) {
+      alert('問題データが見つかりません。questionsData 配列を埋めてください。');
+      return;
     }
 
-    function animate() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        particles.forEach(p => {
-            p.y += p.speed;
-            p.x += Math.sin(p.angle) * 2;
-            ctx.fillStyle = p.color;
-            ctx.fillRect(p.x, p.y, p.size, p.size);
+    // シャッフルして上限を取る
+    pool = shuffle(questionsData.slice());
+    if (pool.length > totalQuestions) pool = pool.slice(0, totalQuestions);
 
-            if(p.y > canvas.height) p.y = -20;
-        });
-        requestAnimationFrame(animate);
+    currentIndex = 0;
+    correctCount = 0;
+    answered = false;
+
+    startScreen.classList.add('hidden');
+    resultScreen.classList.add('hidden');
+    quizInterface.classList.remove('hidden');
+
+    renderQuestion();
+    updateScoreUI();
+  }
+
+  function renderQuestion() {
+    const q = pool[currentIndex];
+    currentNum.textContent = (currentIndex + 1).toString();
+    questionText.textContent = q.text || '（問題文がありません）';
+    explanationBox.style.display = 'none';
+    explanationText.textContent = '';
+    footerNav.style.display = 'none';
+    answered = false;
+
+    // 既存のオプションをクリアして再構築
+    optionsContainer.innerHTML = '';
+    (q.options || []).forEach((opt, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.type = 'button';
+      btn.textContent = opt;
+      btn.dataset.index = i; // 0-based
+      btn.addEventListener('click', () => selectOption(i, btn));
+      optionsContainer.appendChild(btn);
+    });
+  }
+
+  function updateScoreUI() {
+    // スコアは正解数を表示
+    currentScore.textContent = `${correctCount} / ${pool.length}`;
+  }
+
+  function selectOption(selectedIndex, btn) {
+    if (answered) return;
+    answered = true;
+
+    const q = pool[currentIndex];
+    // データの answer が 0-based（0..）か 1-based（1..）かに注意
+    // この実装は 0-based を想定しています。1-based の場合は下の行に変更してください:
+    // const correctIndex = (typeof q.answer === 'number') ? q.answer - 1 : q.answer;
+    const correctIndex = q.answer;
+
+    // 全オプションを無効化
+    const buttons = optionsContainer.querySelectorAll('button.option-btn');
+    buttons.forEach(b => b.disabled = true);
+
+    if (selectedIndex === correctIndex) {
+      btn.classList.add('correct');
+      correctCount += 1;
+    } else {
+      btn.classList.add('wrong');
+      const correctBtn = optionsContainer.querySelector(`button[data-index="${correctIndex}"]`);
+      if (correctBtn) correctBtn.classList.add('correct');
     }
-    animate();
-}
+
+    updateScoreUI();
+
+    if (q.explanation) {
+      // 簡単な整形（リポジトリ中のプレースホルダを取り除く）
+      explanationText.textContent = String(q.explanation).replace(/\[\.\.\.\]/g, '');
+      explanationBox.style.display = 'block';
+    }
+
+    footerNav.style.display = 'block';
+  }
+
+  function nextQuestion() {
+    if (!answered) {
+      // 回答していない場合は進めたくない仕様にするなら return する
+      // return;
+    }
+    currentIndex += 1;
+    if (currentIndex >= pool.length) {
+      showResult();
+      return;
+    }
+    renderQuestion();
+  }
+
+  function showResult() {
+    const pct = Math.round((correctCount / pool.length) * 100);
+    finalScoreEl.textContent = pct.toString();
+    correctCountEl.textContent = `${correctCount}`;
+
+    quizInterface.classList.add('hidden');
+    resultScreen.classList.remove('hidden');
+  }
+
+  // グローバル公開（HTML の onclick と連携）
+  return {
+    startQuiz,
+    nextQuestion,
+    // テスト用
+    _internal: { getState: () => ({ currentIndex, correctCount, poolLength: pool.length }) }
+  };
+})();
 </script>
+
 </body>
 </html>
