@@ -1213,7 +1213,263 @@ window.quizApp = (function () {
     _internal: { getState: () => ({ currentIndex, correctCount, poolLength: pool.length }) }
   };
 })();
-</script>
+/* === 結果演出・最初に戻る機能の追加スクリプト ===
+   - 結果画面が表示されたら自動的にアニメーションを実行します
+   - quizApp.resetQuiz() があれば呼び出します（存在すれば状態をより確実にリセット）
+   - 安全策として quizApp が無くても DOM を初期化します
+*/
 
+(function () {
+  const TOTAL_Q = 15; // 問題数（UI と合わせる）
+  const effectCanvas = document.getElementById('effectCanvas');
+  const effectCtx = effectCanvas && effectCanvas.getContext ? effectCanvas.getContext('2d') : null;
+  let confettiParticles = [];
+  let confettiAnimId = null;
+
+  // レスポンシブにキャンバスを追従
+  function resizeEffectCanvas() {
+    if (!effectCanvas) return;
+    effectCanvas.width = window.innerWidth;
+    effectCanvas.height = window.innerHeight;
+  }
+  window.addEventListener('resize', resizeEffectCanvas);
+  resizeEffectCanvas();
+
+  // 円形プログレス（結果表示）
+  function animateScoreCircle(finalPercent) {
+    const canvas = document.getElementById('scoreCanvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const DPR = window.devicePixelRatio || 1;
+    const w = canvas.width;
+    const h = canvas.height;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.scale(DPR, DPR);
+
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = Math.min(w, h) / 2 - 12;
+    const lineWidth = 14;
+    let current = 0;
+    const duration = 900; // ms
+    const start = performance.now();
+
+    function draw(percent) {
+      ctx.clearRect(0, 0, w, h);
+
+      // 背景トラック
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.strokeStyle = '#f1f5f9';
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+
+      // グラデーションの前景
+      const startAngle = -Math.PI / 2;
+      const endAngle = startAngle + (Math.PI * 2) * (percent / 100);
+
+      // 背景グラデ
+      const grad = ctx.createLinearGradient(0, 0, w, h);
+      grad.addColorStop(0, '#60a5fa');
+      grad.addColorStop(1, '#3b82f6');
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, startAngle, endAngle, false);
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+
+      // 中央の数値は既存の .score-large を使っているためここでは不要
+    }
+
+    function step(now) {
+      const t = Math.min(1, (now - start) / duration);
+      // イージング（ややスムーズに）
+      const eased = 1 - Math.pow(1 - t, 3);
+      current = Math.round(finalPercent * eased);
+      draw(current);
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        draw(finalPercent);
+      }
+    }
+
+    requestAnimationFrame(step);
+  }
+
+  // 軽量コンフェッティ（数秒間）
+  function startConfettiBurst(duration = 2200) {
+    if (!effectCtx) return;
+    const W = effectCanvas.width = window.innerWidth;
+    const H = effectCanvas.height = window.innerHeight;
+    confettiParticles = [];
+    const colors = ['#ef4444','#f97316','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ec4899'];
+    for (let i = 0; i < 80; i++) {
+      confettiParticles.push({
+        x: Math.random() * W,
+        y: -10 - Math.random() * H * 0.2,
+        vx: (Math.random() - 0.5) * 6,
+        vy: 2 + Math.random() * 4,
+        size: 6 + Math.random() * 8,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        rot: Math.random() * Math.PI * 2,
+        vr: (Math.random() - 0.5) * 0.2
+      });
+    }
+    const start = performance.now();
+
+    function frame(now) {
+      const elapsed = now - start;
+      effectCtx.clearRect(0, 0, W, H);
+      confettiParticles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.rot += p.vr;
+        effectCtx.save();
+        effectCtx.translate(p.x, p.y);
+        effectCtx.rotate(p.rot);
+        effectCtx.fillStyle = p.color;
+        effectCtx.fillRect(-p.size/2, -p.size/2, p.size, p.size);
+        effectCtx.restore();
+      });
+      if (elapsed < duration) {
+        confettiAnimId = requestAnimationFrame(frame);
+      } else {
+        // フェードアウト（簡易）
+        setTimeout(() => {
+          if (effectCtx) effectCtx.clearRect(0, 0, W, H);
+        }, 120);
+      }
+    }
+    if (confettiAnimId) cancelAnimationFrame(confettiAnimId);
+    confettiAnimId = requestAnimationFrame(frame);
+  }
+
+  function stopConfetti() {
+    if (confettiAnimId) cancelAnimationFrame(confettiAnimId);
+    if (effectCtx) effectCtx.clearRect(0, 0, effectCanvas.width, effectCanvas.height);
+  }
+
+  // 正答率 -> 習熟度ラベル（日本語）
+  function getProficiencyLabel(percent) {
+    if (percent >= 90) return '熟練: 優秀 (Expert)';
+    if (percent >= 75) return '上級: よくできました (Advanced)';
+    if (percent >= 50) return '中級: 継続学習が必要 (Intermediate)';
+    if (percent >= 25) return '初級: 基礎固めが必要 (Beginner)';
+    return '要改善: もう一度学び直しましょう (Needs Improvement)';
+  }
+
+  // 結果画面が表示されたときの処理
+  function showEnhancedResults() {
+    // final-score 要素がパーセンテージを持っている想定
+    const finalScoreEl = document.getElementById('final-score');
+    const correctCountEl = document.getElementById('correct-count');
+
+    let percent = parseInt(finalScoreEl && finalScoreEl.textContent, 10);
+    let correct = parseInt(correctCountEl && correctCountEl.textContent, 10);
+    if (Number.isNaN(percent)) {
+      // パーセントが設定されていない場合は正解数から計算
+      if (!Number.isNaN(correct)) {
+        percent = Math.round((correct / TOTAL_Q) * 100);
+        if (finalScoreEl) finalScoreEl.textContent = percent;
+      } else {
+        percent = 0;
+      }
+    }
+    // 円形アニメーション
+    animateScoreCircle(percent);
+
+    // 習熟度表示
+    const profEl = document.getElementById('proficiency-text');
+    if (profEl) profEl.textContent = getProficiencyLabel(percent);
+
+    // コンフェッティは 60%以上で祝う（任意）
+    if (percent >= 60) {
+      startConfettiBurst();
+      setTimeout(stopConfetti, 2600);
+    } else {
+      // 低スコアのときは軽いフェード（何もしない）
+      stopConfetti();
+    }
+  }
+
+  // MutationObserver で result-screen の表示変化を監視（既存の仕組みに依存せずにトリガー）
+  const resultScreen = document.getElementById('result-screen');
+  if (resultScreen) {
+    const mo = new MutationObserver(() => {
+      const visible = window.getComputedStyle(resultScreen).display !== 'none' && resultScreen.offsetParent !== null;
+      if (visible) {
+        // 少し遅延して実行（DOM 更新後に確実に動かす）
+        setTimeout(showEnhancedResults, 80);
+      } else {
+        // 非表示時はキャンセルしておく
+        stopConfetti();
+      }
+    });
+    mo.observe(resultScreen, { attributes: true, attributeFilter: ['style', 'class'] });
+  }
+
+  // 「最初に戻る」ボタンの実装
+  window.resetToStart = function resetToStart() {
+    // 優先的に quizApp 側のリセットが用意されていれば呼ぶ
+    try {
+      if (window.quizApp && typeof window.quizApp.resetQuiz === 'function') {
+        window.quizApp.resetQuiz();
+      } else if (window.quizApp && typeof window.quizApp.startState === 'function') {
+        // 万が一の別名
+        window.quizApp.startState();
+      } else {
+        // DOM レベルで簡易にリセット（表示/非表示の切り替えとスコア初期化）
+        document.getElementById('start-screen')?.classList.remove('hidden');
+        document.getElementById('quiz-interface')?.classList.add('hidden');
+        document.getElementById('result-screen')?.classList.add('hidden');
+
+        // スコアやインターフェースの初期化
+        const curNum = document.getElementById('current-num');
+        const curScore = document.getElementById('current-score');
+        const qText = document.getElementById('question-text');
+        const options = document.getElementById('options-container');
+        const expl = document.getElementById('explanation');
+        const footerNav = document.getElementById('footer-nav');
+
+        if (curNum) curNum.textContent = '1';
+        if (curScore) curScore.textContent = '0';
+        if (qText) qText.textContent = 'ここに問題文が表示されます';
+        if (options) options.innerHTML = '';
+        if (expl) { expl.style.display = 'none'; document.getElementById('explanation-text')?.removeAttribute('data'); }
+        if (footerNav) footerNav.style.display = 'none';
+        if (document.getElementById('final-score')) document.getElementById('final-score').textContent = '0';
+        if (document.getElementById('correct-count')) document.getElementById('correct-count').textContent = '0';
+        if (document.getElementById('proficiency-text')) document.getElementById('proficiency-text').textContent = '';
+      }
+    } catch (e) {
+      console.error('resetToStart: リセット処理中にエラー', e);
+      // 最終フォールバック
+      location.reload();
+    } finally {
+      // stop any running confetti
+      stopConfetti();
+    }
+  };
+
+  // もし quizApp が finish/complete 的な関数を持っているなら、ラップして演出を確実に呼ぶ（存在すれば）
+  if (window.quizApp && typeof window.quizApp.finishQuiz === 'function') {
+    const origFinish = window.quizApp.finishQuiz.bind(window.quizApp);
+    window.quizApp.finishQuiz = function (...args) {
+      // 既存の finish を実行（結果画面を出す処理がある想定）
+      const ret = origFinish(...args);
+      // 少し遅らせて演出
+      setTimeout(showEnhancedResults, 60);
+      return ret;
+    };
+  }
+})();
+</script>
 </body>
 </html>
+
